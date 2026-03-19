@@ -8,9 +8,9 @@ NtripDriver::NtripDriver(const rclcpp::NodeOptions & options) : Node("rbf_ntrip_
   load_parameters();
 
   // Configure and start the NTRIP client
-  ntrip_client_ptr_ = std::make_shared<libntrip::NtripClient>(
-    config_.ntrip.host, config_.ntrip.port, config_.ntrip.username, config_.ntrip.password,
-    config_.ntrip.mountpoint);
+    ntrip_client_ptr_ = std::make_shared<libntrip::NtripClient>(
+      config_.ntrip.host, config_.ntrip.port, config_.ntrip.username, config_.ntrip.password,
+      config_.ntrip.mountpoint, config_.ntrip.use_https);
   ntrip_client_ptr_->set_report_interval(static_cast<int>(config_.ntrip.gpgga_interval_sec));
   diagnostic_updater_ = std::make_shared<diagnostic_updater::Updater>(this);
   diagnostic_updater_->setHardwareID("NTRIP DRIVER");
@@ -48,8 +48,8 @@ NtripDriver::NtripDriver(const rclcpp::NodeOptions & options) : Node("rbf_ntrip_
 
   // Create the RTCM publisher if enabled
   if (config_.rtcm_publisher.publish_rtcm) {
-    pub_rtcm_ = this->create_publisher<mavros_msgs::msg::RTCM>(
-      config_.rtcm_publisher.topic_name, rclcpp::SensorDataQoS());
+    pub_rtcm_ = this->create_publisher<rtcm_msgs::msg::Message>(
+      config_.rtcm_publisher.topic_name, rclcpp::QoS(10).reliable());
   }
   // Subscribe to NAV-SAT-FIX if it's used initially, Otherwise, try to establish the NTRIP
   // connection
@@ -162,9 +162,10 @@ void NtripDriver::load_parameters()
   config_.ntrip.use_gpgga_for_ntrip = declare_parameter("ntrip.use_gpgga_for_ntrip", false);
   config_.ntrip.gpgga_topic_name = declare_parameter("ntrip.gpgga_topic_name", "/gpgga");
   config_.ntrip.gpgga_interval_sec = declare_parameter("ntrip.gpgga_interval_sec", 5.0);
+    config_.ntrip.use_https = declare_parameter("ntrip.use_https", false);
   config_.ntrip.shutdown_if_not_connected = declare_parameter("ntrip.shutdown_if_not_connected", false);
   config_.ntrip.shutdown_length_sec = declare_parameter("ntrip.shutdown_length_sec", 10);
-  
+
   config_.serial_port.port = declare_parameter("serial_port.name", "/dev/ttyUSB0");
   config_.serial_port.baudrate = declare_parameter("serial_port.baud_rate", 9600);
   config_.serial_port.publish_port_rtcm = declare_parameter("serial_port.publish_port_rtcm", false);
@@ -175,6 +176,7 @@ void NtripDriver::load_parameters()
 
   RCLCPP_INFO(this->get_logger(), "---------NTRIP CONFIGURATION--------");
   RCLCPP_INFO(this->get_logger(), "host: %s", config_.ntrip.host.c_str());
+  RCLCPP_INFO(this->get_logger(), "use_https: %d", config_.ntrip.use_https);
   RCLCPP_INFO(this->get_logger(), "port: %d", config_.ntrip.port);
   RCLCPP_INFO(this->get_logger(), "mountpoint: %s", config_.ntrip.mountpoint.c_str());
   RCLCPP_INFO(this->get_logger(), "username: %s", config_.ntrip.username.c_str());
@@ -282,10 +284,10 @@ void NtripDriver::diagnostic_callback(diagnostic_updater::DiagnosticStatusWrappe
 void NtripDriver::ntrip_client_callback(char const * _buffer, int _size)
 {
   ntrip_time_ = this->now();
-  auto rtcm_msg = mavros_msgs::msg::RTCM();
+  auto rtcm_msg = rtcm_msgs::msg::Message();
   rtcm_msg.header.stamp = this->now();
   rtcm_msg.header.frame_id = config_.rtcm_publisher.frame_id;
-  rtcm_msg.data = std::vector<uint8_t>(_buffer, _buffer + _size);
+  rtcm_msg.message = std::vector<uint8_t>(_buffer, _buffer + _size);
   if (config_.rtcm_publisher.publish_rtcm) {
     pub_rtcm_->publish(rtcm_msg);
   }

@@ -44,20 +44,21 @@ class NtripClient {
   NtripClient& operator=(NtripClient&&) = delete;
   NtripClient(std::string const& ip, int port,
       std::string const& user, std::string const& passwd,
-      std::string const& mountpoint) :
+      std::string const& mountpoint, bool use_https = false) :
         server_ip_(ip), server_port_(port),
         user_(user), passwd_(passwd),
-        mountpoint_(mountpoint) { }
+        mountpoint_(mountpoint), use_https_(use_https) { }
   ~NtripClient() { Stop(); }
 
   void Init(std::string const& ip, int port,
       std::string const& user, std::string const& passwd,
-      std::string const& mountpoint) {
+      std::string const& mountpoint, bool use_https = false) {
     server_ip_ = ip;
     server_port_ = port;
     user_ = user;
     passwd_ = passwd;
     mountpoint_ = mountpoint;
+    use_https_ = use_https;
   }
   // 更新发送的GGA语句.
   // 根据ntrip账号的要求, 如果距离服务器位置过远, 服务器不会返回差分数据.
@@ -77,6 +78,8 @@ class NtripClient {
 
   // 设置接收到数据时的回调函数.
   void OnReceived(const ClientCallback &callback) { callback_ = callback; }
+  // Forward received bytes into the registered callback (safe public wrapper).
+  void ForwardToCallback(const char* buf, int size) { callback_(buf, size); }
   bool Run(void);
   void Stop(void);
   bool service_is_running(void) const {
@@ -89,9 +92,9 @@ class NtripClient {
 
   std::atomic_bool service_is_running_ = {false};
   std::atomic_bool gga_is_update_ = {false};  // 外部更新GGA数据标志.
-  int report_interval_;  // GGA数据上报时间间隔.
-  double latitude_;  // 固定坐标纬度.
-  double longitude_;  // 固定坐标经度.
+  int report_interval_ = 5;  // GGA数据上报时间间隔.
+  double latitude_ = 0.0;  // 固定坐标纬度.
+  double longitude_ = 0.0;  // 固定坐标经度.
   std::string server_ip_;
   int server_port_ = -1;
   std::string user_;
@@ -101,6 +104,7 @@ class NtripClient {
   int socket_fd_ = -1;
   Thread thread_;
   ClientCallback callback_ = [] (char const*, int) -> void {};
+  bool use_https_ = false;
 };
 
 }  // namespace libntrip
