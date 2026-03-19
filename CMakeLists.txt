@@ -13,6 +13,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(mavros_msgs REQUIRED)
 find_package(diagnostic_updater REQUIRED)
 find_package(nmea_msgs REQUIRED)
+find_package(CURL REQUIRED)
 
 include_directories(include)
 
@@ -31,7 +32,10 @@ ament_target_dependencies(rbf_ntrip_driver_component
   mavros_msgs
   diagnostic_updater
   nmea_msgs
+  CURL
 )
+
+target_link_libraries(rbf_ntrip_driver_component CURL::libcurl)
 
 rclcpp_components_register_node(
   rbf_ntrip_driver_component

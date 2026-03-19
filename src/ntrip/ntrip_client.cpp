@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <curl/curl.h>
 
 #include <chrono>
 #include <string>
@@ -48,100 +49,25 @@ namespace libntrip {
     bool NtripClient::Run(void) {
         if (service_is_running_.load()) return true;
         Stop();
-        if (socket_fd_ > 0) {
-            close(socket_fd_);
-            socket_fd_ = -1;
-        }
-        // Establish a connection with NtripCaster.
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(server_port_);
-        server_addr.sin_addr.s_addr = inet_addr(server_ip_.c_str());
-        int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (socket_fd == -1) {
-            printf("Create socket failed, errno = -%d\n", errno);
+        CURL *curl = curl_easy_init();
+        if (!curl) {
+            printf("Failed to initialize libcurl\n");
             return false;
         }
-        if (connect(socket_fd, reinterpret_cast<struct sockaddr *>(&server_addr),
-                    sizeof(server_addr)) < 0) {
-            printf("Connect to NtripCaster[%s:%d] failed, errno = -%d\n",
-                   server_ip_.c_str(), server_port_, errno);
-            close(socket_fd);
+        std::string url = (use_https_ ? "https://" : "http://") + server_ip_ + ":" + std::to_string(server_port_) + "/" + mountpoint_;
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_USERPWD, (user_ + ":" + passwd_).c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTP09_ALLOWED, 1L);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "NTRIP ros2/ublox_dgnss");
+        // TODO: Add GGA sending logic if required by caster
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            printf("libcurl connection failed: %s\n", curl_easy_strerror(res));
+            curl_easy_cleanup(curl);
             return false;
         }
-        // Set non-blocking.
-        int flags = fcntl(socket_fd, F_GETFL);
-        fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
-        // Ntrip connection authentication.
-        int ret = -1;
-        std::string user_passwd = user_ + ":" + passwd_;
-        std::string user_passwd_base64;
-        std::unique_ptr<char[]> buffer(
-                new char[kBufferSize], std::default_delete<char[]>());
-        // Generate base64 encoding of username and password.
-        Base64Encode(user_passwd, &user_passwd_base64);
-        // Generate request data format of ntrip.
-        ret = snprintf(buffer.get(), kBufferSize-1,
-                       "GET /%s HTTP/1.1\r\n"
-                       "User-Agent: %s\r\n"
-                       "Authorization: Basic %s\r\n"
-                       "\r\n",
-                       mountpoint_.c_str(), kClientAgent, user_passwd_base64.c_str());
-        if (send(socket_fd, buffer.get(), ret, 0) < 0) {
-            printf("Send request failed!!!\n");
-            close(socket_fd);
-            return false;
-        }
-        // Waitting for request to connect caster success.
-        int timeout = 20;
-        while (timeout--) {
-            ret = recv(socket_fd, buffer.get(), kBufferSize, 0);
-            if (ret > 0) {
-                std::string result(buffer.get(), ret);
-                if ((result.find("HTTP/1.1 200 OK") != std::string::npos) ||
-                    (result.find("ICY 200 OK") != std::string::npos)) {
-                    if (gga_buffer_.empty()) {
-                        GGAFrameGenerate(latitude_, longitude_, 10.0, &gga_buffer_);
-                    }
-                    ret = send(socket_fd, gga_buffer_.c_str(), gga_buffer_.size(), 0);
-                    if (ret < 0) {
-                        printf("Send gpgga data fail\n");
-                        close(socket_fd);
-                        return false;
-                    }
-                    // printf("Send gpgga data ok\n");
-                    break;
-                } else {
-                    printf("Request result: %s\n", result.c_str());
-                }
-            } else if (ret == 0) {
-                printf("Remote socket close!!!\n");
-                close(socket_fd);
-                return false;
-            }
-            sleep(1);
-        }
-        if (timeout <= 0) {
-            printf("NtripCaster[%s:%d %s %s %s] access failed!!!\n",
-                   server_ip_.c_str(), server_port_,
-                   user_.c_str(), passwd_.c_str(), mountpoint_.c_str());
-            close(socket_fd);
-            return false;
-        }
-        // TCP socket keepalive.
-        int keepalive = 1;  // Enable keepalive attributes.
-        int keepidle = 30;  // Time out for starting detection.
-        int keepinterval = 5;  // Time interval for sending packets during detection.
-        int keepcount = 3;  // Max times for sending packets during detection.
-        setsockopt(socket_fd, SOL_SOCKET, SO_KEEPALIVE,
-                   &keepalive, sizeof(keepalive));
-        setsockopt(socket_fd, SOL_TCP, TCP_KEEPIDLE, &keepidle, sizeof(keepidle));
-        setsockopt(socket_fd, SOL_TCP, TCP_KEEPINTVL,
-                   &keepinterval, sizeof(keepinterval));
-        setsockopt(socket_fd, SOL_TCP, TCP_KEEPCNT, &keepcount, sizeof(keepcount));
-        socket_fd_ = socket_fd;
-        thread_.reset(&NtripClient::ThreadHandler, this);
+        // TODO: Setup data streaming and callbacks
+        curl_easy_cleanup(curl);
         return true;
     }
 
