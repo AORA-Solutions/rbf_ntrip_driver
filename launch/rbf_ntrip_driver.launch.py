@@ -3,13 +3,23 @@ import launch
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+
 
 def generate_launch_description():
-    config = os.path.join(
+    default_params_file = os.path.join(
         get_package_share_directory('rbf_ntrip_driver'),
         'config',
         'rbf_ntrip_driver.param.yaml'
     )
+
+    params_file_arg = DeclareLaunchArgument(
+        'params_file',
+        default_value=default_params_file,
+        description='Full path to the ROS2 parameters file to use'
+    )
+
 
     container = ComposableNodeContainer(
     name='rbf_ntrip_driver',
@@ -21,10 +31,10 @@ def generate_launch_description():
             package='rbf_ntrip_driver',
             plugin='rbf_ntrip_driver::NtripDriver',
             name='rbf_ntrip_driver_node',
-            parameters=[config],
+            parameters=[LaunchConfiguration('params_file')],
             extra_arguments=[{'use_intra_process_comms': True}],
             ),
         ]
     )
 
-    return launch.LaunchDescription([container])
+    return launch.LaunchDescription([params_file_arg,container])
